@@ -98,7 +98,7 @@ synthetic placeholder, **0** = always zero.
 | 296 | f32 | best lap | **R** seconds, 0.0 until a lap completes |
 | 300 | f32 | last lap | **R** seconds |
 | 304 | f32 | current lap | **R** live lap timer (0 while the clock isn't counting) |
-| 308 | f32 | current race time | **R** same timer |
+| 308 | f32 | current race time | **R** the stage clock: 0 at each stage start, laps summed, on the same clock as 304 (0 off the race) |
 | 312 | u16 | lap number | **R** 1-based |
 | 314 | u8 | race position | **R** 1-based, 1 = leader (stale on result screens — gate on is_race_on) |
 | 315 | u8 | accel | **R** 0-255 |
@@ -165,7 +165,9 @@ The race: countdown → launch, steering right then left at speed, gear 1→2
 shifts, wall contacts (long_g spikes, real yaw-rate oscillation), signed
 distance going backwards when reversed off a wall, suspension load transfer.
 Captured with `--headless` (compressed arrival times — replay by
-`frame`/`timestamp_ms`).
+`frame`/`timestamp_ms`). Captured before offset 308 carried the stage clock;
+the run never completes a lap, so 308 equals the lap timer at 304
+throughout, which is also what it reads now.
 
 Reproduce a capture:
 

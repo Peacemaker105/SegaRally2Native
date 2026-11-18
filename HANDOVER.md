@@ -126,8 +126,10 @@ menus the car block is stale.
 - `save/settings.ini` holds `experience = pc|arcade` — ARCADE ORIGINAL boots
   the cabinet attract (looks like "the original game's menu"); Esc → pause →
   back to PC EDITION, or edit the file while the game is closed.
-- Upstream repo gets updates via `update.bat`; the two-line hook (item 2
-  above) is what to re-apply.
+- Upstream updates: `git pull upstream main` (this checkout's `upstream`
+  remote is snicolast's repo, `origin` the fork). `update.bat` overwrites
+  `runtime.cpp` and `CMakeLists.txt`, so after it the two-line hook (item 2
+  above) has to be re-applied.
 
 ## Where things stand / next ideas
 
@@ -139,6 +141,13 @@ menus the car block is stale.
 - Possible next: world-position/vertical mapping (road spline height at
   track point), a JSON/Forza recorder + replay tool for rig tuning, upstream
   PR for the telemetry (author's call, issue #111).
+- Open: the dash timing fields mix two clocks. 304 (current lap) and 308
+  (race time) count real seconds (frames ÷ 57.524); the HUD, 296 (best lap)
+  and 300 (last lap) count the game's 1/60 s a frame, 4.1 % slower — at
+  48.00 s on the game's clock, 304 reads 50.07. One clock for all four (the
+  HUD's) is the natural fix. 308 past a completed lap is not run-tested yet.
+- Open: JSON `total_bcd`/`lap_bcd` decode 8 bits too high — `bcd_time`
+  reads 0xMSSmmm as if it were 0xMSSmmm00, so 47.9 s comes out as 0.479.
 - Related project: the same method and packet were carried over to Daytona
   USA (Model 2/i960) — Peacemaker105/daytona-arcade-recomp,
   `docs/telemetry.md`. Daytona USA 2 would be Model 3/PPC, like this game.

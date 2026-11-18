@@ -236,18 +236,22 @@ uint64_t frame_count = 0;
 bool open_socket(const char* host, int port) {
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa)) return false;
-    sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock == INVALID_SOCKET) return false;
     memset(&dest, 0, sizeof dest);
     dest.sin_family = AF_INET;
     dest.sin_port = htons(uint16_t(port));
-    inet_pton(AF_INET, host, &dest.sin_addr);
-    if (dest.sin_addr.s_addr == INADDR_NONE) {   // a name, then
-        addrinfo* ai = nullptr;
-        if (getaddrinfo(host, nullptr, nullptr, &ai) || !ai) return false;
+    // A dotted address as it is, else a name to look up (inet_pton returns 1
+    // only for an address, and leaves sin_addr alone otherwise)
+    if (inet_pton(AF_INET, host, &dest.sin_addr) != 1) {
+        addrinfo hints{}, *ai = nullptr;
+        hints.ai_family = AF_INET;   // dest is a sockaddr_in: an IPv4 answer (localhost is ::1 first)
+        if (getaddrinfo(host, nullptr, &hints, &ai) || !ai) return false;
         dest.sin_addr = ((sockaddr_in*)ai->ai_addr)->sin_addr;
         freeaddrinfo(ai);
     }
+    // The socket once the address is known: a name that does not resolve
+    // leaves the telemetry off instead of sending into nothing
+    sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock == INVALID_SOCKET) return false;
     // A broadcast address (a rig on another machine's subnet, x.x.x.255) is
     // allowed only with the socket option set
     if (ntohl(dest.sin_addr.s_addr) == 0xFFFFFFFF || (ntohl(dest.sin_addr.s_addr) & 0xFF) == 0xFF) {
@@ -308,7 +312,9 @@ size_t build_forza(const Sample& s, uint8_t* p) {
     put_f32(d + 44, 0.5f);   // fuel
     put_f32(d + 48, float(s.dist));   // distance along the road, metres
     put_f32(d + 52, float(s.best_lap)), put_f32(d + 56, float(s.last_lap)), put_f32(d + 60, float(s.lap_time));
-    put_f32(d + 64, float(s.lap_time));   // current race time
+    // Current race time: the stage clock (0 at each stage start, the laps summed;
+    // the game counts 1/60 s a frame), on the same clock as the current lap above
+    put_f32(d + 64, s.on ? float(std::clamp(s.race_time * 60.0 / FRAME_HZ, 0.0, 3600.0)) : 0.0f);
     uint16_t lap_no = uint16_t(std::clamp(s.lap_no + 1, 1, 99));
     memcpy(d + 68, &lap_no, 2);
     d[70] = uint8_t(std::clamp(s.position + 1, 1, 255));   // race position, 1 = 1st
@@ -370,7 +376,7 @@ void telemetry_frame(float ffb_force, float ffb_vibration) {
             return;
         }
         if (!open_socket(host, port)) {
-            printf("[telemetry] could not open a UDP socket for %s:%d\n", host, port);
+            printf("[telemetry] could not resolve %s or open a UDP socket (port %d)\n", host, port);
             return;
         }
         printf("[telemetry] sending %s to %s:%d at %.1f Hz\n", fmt.c_str(), host, port, FRAME_HZ);
