@@ -35,6 +35,7 @@
 #include "../video/r3d_state.h"
 #include "stats.h"
 #include "options.h"
+#include "telemetry.h"
 
 extern Options g_opt;   // app.cpp: command line and menu settings (DIFFICULTY)
 
@@ -1423,6 +1424,7 @@ void rt_event(Ctx& c) {
                     printf("[select] car %d (frame %llu)\n", car, (unsigned long long)g_frame);
             }
             stats_frame();
+            telemetry_frame(g_drive.force(), g_drive.vibration());   // UDP to a motion rig or dashboard (SR2_TELEMETRY, telemetry.h)
             // The course of the race being run (round = course id + 6 x kind: championship,
             // practice, attract; docs/game_ram.md): 5 is SWEDISH, the Snowy course
             r3d_set_sr2_snowy(int32_t(rd32(0x22CF48)) % 6 == 5);

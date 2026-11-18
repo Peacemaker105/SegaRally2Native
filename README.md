@@ -10,6 +10,12 @@
 > original game is in this repository: no ROM, no code, no music or voices. To play you need your
 > own copy of the arcade game (`srally2.zip`), and the game is built from it on your PC.
 
+> [!NOTE]
+> **Modified version.** This is a fork of [snicolast/SegaRally2Native](https://github.com/snicolast/SegaRally2Native),
+> the original project by snicolast. It adds UDP telemetry for motion rigs and dashboards
+> ([docs/TELEMETRY.md](docs/TELEMETRY.md)); everything else is the original, under the same
+> [license and terms](LICENSE).
+
 <p align="center">
   <a href="https://www.youtube.com/@snicolast"><img src="https://img.shields.io/badge/YouTube-@snicolast-red?logo=youtube&logoColor=white" alt="YouTube: snicolast"></a>
   <a href="https://buymeacoffee.com/snicolast8u"><img src="https://img.shields.io/badge/Buy_me_a_coffee-snicolast8u-FFDD00?logo=buymeacoffee&logoColor=black" alt="Buy me a coffee"></a>
@@ -111,6 +117,7 @@ Running slow? In OPTIONS, try these in order:
 - Textures of your own: `--dump-textures` writes the game's to `out\textures\`; a redrawn one
   in `textures\` with the same name replaces it.
 - [How it works](docs/ARCHITECTURE.md): the PowerPC to C++ recompiler and the hardware.
+- Telemetry for a motion rig or dashboard: set `SR2_TELEMETRY=127.0.0.1:20777@forza` (UDP, JSON or the Forza format SimHub reads) — [docs/TELEMETRY.md](docs/TELEMETRY.md).
 - Other recompiled arcade games: [The Lost World](https://github.com/snicolast/LostWorldNative)
   and [Star Wars Trilogy](https://github.com/snicolast/StarWarsTrilogyNative).
 

@@ -286,6 +286,42 @@ menu first (0x137124 = 1, then 0x7107C), which ran unseen for some 1900
 frames. Writing -1 (power on) to the main sequence's next entry leaves the
 game stuck.
 
+## Player car state (road-space physics)
+
+The player car's state lives in a 396-byte heap block pointed to by
+**[0x2242B0]** (set at fn_000322BC: a list-node allocation, the pointer is
+node + 0xC; 0x776A8C in the runs here, read the pointer every frame, it is not
+a constant). Offsets confirmed by RAM-dump diffing: a straight run vs a
+steering run (fields that diverge = steering-coupled), two mirrored runs
+(aim176 vs aim80, fields that flip sign exactly = lateral group), and a
+straight full-brake run (fields that move = longitudinal). All floats.
+
+| Offset | Type | What it is |
+|---|---|---|
+| +0x00 | float | **Lateral offset** from the road's centre line, metres, + right. Confirmed mirrored: +10.58 steering right vs -10.58 left |
+| +0x04 | float | **Heading** (yaw), radians, world frame. Stays put driving straight; unwrapped derivative = yaw rate |
+| +0x08 | float | **Distance along the road**, metres, **signed** — a wall bounce can take it backwards (50 → 28 m). 4 per-wheel copies at +0x54, a previous-frame copy at +0xF8 |
+| +0x0C | float | **Body roll**, radians, + leaning left. Confirmed mirrored (±0.24); constant 0 in straight runs. No steering-independent angle here: straight full-braking does not move it |
+| +0x0FC | float | **Body pitch**, radians, + nose up: brake dive, −0.075 (−4.3°) under a −2.9 g straight-braking stop, decaying to 0 as the car stops. Holds 0 under steady acceleration and at rest; wall hits and road crests move it further. Found in the dense-brake dumps (tools/car_scan.py window); its neighbours +0x0F0/+0x0F4/+0x0F8 mirror +0x00/+0x04/+0x08, pitch has no +0x0C-side counterpart |
+| +0x14 | float | **Velocity along the road**, signed, divided by 60.24 (read 0.881 at 53.08 m/s). Diverges from the HUD speed while sliding |
+| +0x20 | float | The game's own steering, -0.637 (full right) .. +0.637 (full left), 1.556 x the ADC input |
+| +0x24..+0x30 | 4×float | Per-wheel suspension compression, ~0.09..0.20 (x4 = about 0..1) |
+| +0x34..+0x40 | 4×float | Per-wheel grip/slip metric: ~0.25 slow and clean, ~-1.0 at speed, spikes when off-road |
+| +0x48 | int | Track point under the car (fn_0003F1AC reads this for the progress counter) |
+| +0x10C | float | The tire model's lateral force incl. slip, + = left. Hits ±2.7 in wall bounces; does not vanish at walking pace (it is a force model, not kinematics) |
+| +0x12C | float | Engine/gearbox gauge value: 1.4628 in 3rd, 2.5598 in 4th |
+| +0x134 | float | RPM ceiling (8800; the value dips mid-gear) — not the live RPM |
+| +0x0F0..+0x0F8 | — | Mirrors of +0x00/+0x04/+0x08 (lateral, heading, distance) at the display stage: usually a frame behind, occasionally diverging |
+| +0x0FC | — | Body pitch (see above) — the one angle that lives only here |
+| +0x080..+0x0EC, +0x13C..+0x17C | — | 0x7FFFFFFE fill |
+
+Related block at 0x1B0C24 (written by fn_00039AC8, the drivetrain/engine
+update): +0x24 a copy of the HUD speed, +0x58 the engine speed normalised
+0..~1 (x 8800 = RPM; falls toward idle coasting, 0 when stopped). +0x4C and
++0x60 wobble ±0.6 with steering. fn_0002FBFC copies values out for the HUD;
+the replay-style ring recorder at fn_0002FBFC (0x31EA4) writes 500 x 16-byte
+records at 0x1ACCE4.
+
 ## Other fields seen (not needed so far)
 
 | Address | What it is |
