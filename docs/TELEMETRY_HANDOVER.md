@@ -95,10 +95,10 @@ synthetic placeholder, **0** = always zero.
 | 284 | f32 | boost | **S** 0 |
 | 288 | f32 | fuel | **S** 0.5 |
 | 292 | f32 | distance traveled | **R** signed metres along the road (decreases sliding backwards!) |
-| 296 | f32 | best lap | **R** seconds, 0.0 until a lap completes |
+| 296 | f32 | best lap | **R** seconds, 0.0 until a lap completes. 296-308 are all on the game's own clock, as the HUD shows them: 1/60 s a frame, 4.1 % slower than real time at 57.524 Hz |
 | 300 | f32 | last lap | **R** seconds |
 | 304 | f32 | current lap | **R** live lap timer (0 while the clock isn't counting) |
-| 308 | f32 | current race time | **R** the stage clock: 0 at each stage start, laps summed, on the same clock as 304 (0 off the race) |
+| 308 | f32 | current race time | **R** the stage clock: 0 at each stage start, laps summed (0 off the race) |
 | 312 | u16 | lap number | **R** 1-based |
 | 314 | u8 | race position | **R** 1-based, 1 = leader (stale on result screens — gate on is_race_on) |
 | 315 | u8 | accel | **R** 0-255 |
@@ -150,7 +150,10 @@ Fields beyond the Forza packet: `v_road` (signed road velocity m/s),
 `phase`, `seq`, `result`, `goal`, `clock`, `time_left`, `car`, `gears`,
 `lap_time`, `best_lap`, `last_lap`, `race_time`, `total_bcd`, `lap_bcd`,
 `ffb`, `vib`, `shake`, `hand`). `round`: championship Desert=3, Mountain=2,
-Snowy=5, Riviera=4; practice = +6.
+Snowy=5, Riviera=4; practice = +6. The times (`lap_time`, `best_lap`,
+`last_lap`, `race_time`, and the HUD's TOTAL TIME / LAP TIME as `total_bcd` /
+`lap_bcd`) are seconds on the game's own clock, as the HUD shows them;
+`total_bcd` / `lap_bcd` read 0 while the HUD shows no time.
 
 ## 5. Sample data (in this repo)
 
@@ -165,9 +168,11 @@ The race: countdown → launch, steering right then left at speed, gear 1→2
 shifts, wall contacts (long_g spikes, real yaw-rate oscillation), signed
 distance going backwards when reversed off a wall, suspension load transfer.
 Captured with `--headless` (compressed arrival times — replay by
-`frame`/`timestamp_ms`). Captured before offset 308 carried the stage clock;
-the run never completes a lap, so 308 equals the lap timer at 304
-throughout, which is also what it reads now.
+`frame`/`timestamp_ms`). Captured before the timing fix: in these files
+304 and 308 (and the JSON `lap_time`) count real seconds, frames ÷ 57.524,
+where the emitter now sends the game's clock, frames ÷ 60; `total_bcd` /
+`lap_bcd` are 100× too small (decoded 8 bits off). Everything else is as the
+emitter sends it now.
 
 Reproduce a capture:
 

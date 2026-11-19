@@ -43,6 +43,9 @@
 namespace {
 
 constexpr double FRAME_HZ = 57.524;   // the Model 3's vblank
+constexpr double GAME_CLOCK_FPS = 60;   // the game's own timekeeping: 1/60 s a frame (100 ticks), so its
+                                        // seconds run 4.1 % slower than real ones. The HUD, the lap
+                                        // records and every time sent below count this way
 constexpr float G = 9.80665f;
 
 // Game RAM
@@ -108,11 +111,15 @@ bool valid_car(uint32_t car) {   // the pointer is a heap block in RAM, or stale
     return car >= 0x100000 && car < 0x800000 - 0x200;
 }
 
-// 0xMSSmmm, digits of minutes, seconds and thousandths (0x151466 is 1'51"466)
+// A HUD time: 0xMSSmmm, digits of minutes, seconds and thousandths (0x151466 is
+// 1'51"466). 0 when the HUD shows none: -1 between stages, or any non-digit
 int bcd_nib(uint32_t b, int shift) { return int(b >> shift) & 0xF; }
 double bcd_time(uint32_t b) {
-    return bcd_nib(b, 28) * 60.0 + bcd_nib(b, 24) * 10.0 + bcd_nib(b, 20) + bcd_nib(b, 16) / 10.0 +
-           bcd_nib(b, 12) / 100.0 + bcd_nib(b, 8) / 1000.0;
+    if (b >> 24) return 0;
+    for (int shift = 0; shift < 24; shift += 4)
+        if (bcd_nib(b, shift) > 9) return 0;
+    return bcd_nib(b, 20) * 60.0 + bcd_nib(b, 16) * 10.0 + bcd_nib(b, 12) + bcd_nib(b, 8) / 10.0 +
+           bcd_nib(b, 4) / 100.0 + bcd_nib(b, 0) / 1000.0;
 }
 
 double seconds_of(int32_t ticks) { return double(ticks) / 6000.0; }
@@ -146,7 +153,7 @@ struct Sample {
     int clock = 0, left = 0, goal = 0, result = 0, mode = -1, round = -1;
     int sequence = 0, phase = 0;
     int car = 0, gears = 0;
-    double lap_time = 0, best_lap = 0, last_lap = 0, race_time = 0, total_bcd = 0, lap_bcd = 0;
+    double lap_time = 0, best_lap = 0, last_lap = 0, race_time = 0, total_bcd = 0, lap_bcd = 0;   // s, the game's clock
     uint64_t frame = 0;
 
     static Sample read(uint64_t frame, float ffb_force, float ffb_vibration) {
@@ -186,7 +193,7 @@ struct Sample {
         s.brake = std::clamp(float(g_inputs.brake) / 255.0f, 0.0f, 1.0f);
         s.hand = g_inputs.handbrake;
         s.ffb = ffb_force, s.vib = ffb_vibration;
-        if (s.on && s.clock == CLOCK_COUNTING) s.lap_time = std::clamp(double(rdi(LAP_FRAMES)) / FRAME_HZ, 0.0, 3600.0);
+        if (s.on && s.clock == CLOCK_COUNTING) s.lap_time = std::clamp(double(rdi(LAP_FRAMES)) / GAME_CLOCK_FPS, 0.0, 3600.0);
         for (int i = 0; i < std::min(std::min(s.laps_done, s.laps), MAX_LAPS); i++)
             s.last_lap = seconds_of(rdi(G_LAP_TIMES + 4 * uint32_t(i)));
         s.best_lap = s.last_lap;   // the game sorts nothing: keep the smallest of the lap times
@@ -311,10 +318,10 @@ size_t build_forza(const Sample& s, uint8_t* p) {
     put_f32(d + 40, 0);   // boost
     put_f32(d + 44, 0.5f);   // fuel
     put_f32(d + 48, float(s.dist));   // distance along the road, metres
+    // The times, seconds of the game's own clock as the HUD shows them: best, last and
+    // current lap, then the race time - the stage clock, 0 at each stage start, laps summed
     put_f32(d + 52, float(s.best_lap)), put_f32(d + 56, float(s.last_lap)), put_f32(d + 60, float(s.lap_time));
-    // Current race time: the stage clock (0 at each stage start, the laps summed;
-    // the game counts 1/60 s a frame), on the same clock as the current lap above
-    put_f32(d + 64, s.on ? float(std::clamp(s.race_time * 60.0 / FRAME_HZ, 0.0, 3600.0)) : 0.0f);
+    put_f32(d + 64, s.on ? float(std::clamp(s.race_time, 0.0, 3600.0)) : 0.0f);
     uint16_t lap_no = uint16_t(std::clamp(s.lap_no + 1, 1, 99));
     memcpy(d + 68, &lap_no, 2);
     d[70] = uint8_t(std::clamp(s.position + 1, 1, 255));   // race position, 1 = 1st
