@@ -51,7 +51,7 @@ constexpr float G = 9.80665f;
 // Game RAM
 constexpr uint32_t SEQUENCE = 0x22D618, PHASE = 0x22D624;
 constexpr uint32_t GAME = 0x22CF14;
-constexpr uint32_t G_MODE = GAME + 0x00, G_ROUND = GAME + 0x34, G_LAPS = GAME + 0x38;
+constexpr uint32_t G_MODE = GAME + 0x00, G_ROUND = GAME + 0x34, G_LAPS = GAME + 0x3C;   // laps of this race (+0x38: the stages)
 constexpr uint32_t G_CAR_STATUS = GAME + 0x6C, G_CLOCK = GAME + 0x70, G_LEFT = GAME + 0x74;
 constexpr uint32_t G_GOAL = GAME + 0x7C, G_LAPS_DONE = GAME + 0x94, G_CHECKPOINTS = GAME + 0x98;
 constexpr uint32_t G_SECTION = GAME + 0x9C, G_PROGRESS = GAME + 0xA8, G_RANK = GAME + 0x104;

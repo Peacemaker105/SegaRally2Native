@@ -156,6 +156,9 @@ menus the car block is stale.
   record matched the lap timer (16.66 against 16.67). Seen with poked laps
   only (a poke 1 or 44 points past the line gives the same numbers); a lap
   driven over the line is still to compare.
+- Best and last lap count the race's laps (+0x3C) since 2026-11-19. The
+  lap count came from +0x38, the stages (1 in practice), so in practice they
+  only ever looked at lap 1, and the JSON `laps` showed the stages.
 - Related project: the same method and packet were carried over to Daytona
   USA (Model 2/i960) — Peacemaker105/daytona-arcade-recomp,
   `docs/telemetry.md`. Daytona USA 2 would be Model 3/PPC, like this game.
