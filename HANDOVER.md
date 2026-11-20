@@ -70,28 +70,29 @@ and the frames 4876-4906 negative-lat_g segment in `capture.ndjson`).
 
 ## The reverse-engineered car state (the valuable bit)
 
-The player car's road-space physics lives in a 396-byte heap block, pointer
-at **[0x2242B0]** (dereference every frame; the block address changes per
-session). Full table in `docs/game_ram.md` "Player car state"; short form:
+The player car's state is a **world-space rigid body** in a 396-byte heap
+block, pointer at **[0x2242B0]** (dereference every frame; the block address
+changes per session). Full table in `docs/game_ram.md` "Player car state";
+short form:
 
 | Offset | Field |
 |---|---|
-| +0x00 | lateral offset, m, + right of centre |
-| +0x04 | heading, rad, world |
-| +0x08 | signed metres along the road |
-| +0x0C | roll, rad, + lean left |
-| +0x14 | road velocity ÷ 60.24, signed |
+| +0x00/04/08 | world position X, Y (height), Z, m |
+| +0x0C/10/14 | world velocity X, Y, Z, m per game frame |
 | +0x20 | game steering, ±0.637, − = right |
 | +0x24 | 4× per-wheel suspension |
 | +0x48 | track point (int) |
-| +0xFC | pitch, rad, + nose up (brake dive; 0 under accel/at rest; impacts move it) |
-| +0x10C | tire-model lateral force, + left |
+| +0x108 | pitch, rad, + nose up |
+| +0x10C | heading, rad; −it grows turning right |
+| +0x110 | roll, rad, + leaning right |
 | 0x1B0C58 | engine RPM normalized ×8800 |
 
-Not mapped yet: world position, vertical velocity (heave is modelled),
-the car's own orientation matrix (the game keeps the car in road space —
-there is likely no chassis matrix in RAM at all; the render matrices found by
-`tools/matrix_scan.py` are wheels/particles).
+**2026-11-20 re-map:** the first map read these as road-space values (lateral
+offset, road heading, road distance, body roll at +0x0C, pitch at +0xFC). Those
+were world X/height/Z, the X velocity and its display copy: the scripted runs
+it came from never left the start straight. The new map was checked against
+the renderer's picture of the car (chase view: the car model's axes; DRIVER
+view: the in-car camera). Method in docs/game_ram.md.
 
 ### The RE method (for extending the map)
 

@@ -17,13 +17,13 @@
 //   Z = longitudinal (+ accelerating), all in m/s^2; velocity Z is the
 //   forward speed, angular velocity Y the yaw rate (+ turning right).
 //
-// The player car's road-space physics state is mapped (docs/game_ram.md
-// "Player car state"): the lateral offset, the heading, the signed distance
-// along the road, the body roll, the road-relative velocity, the per-wheel
-// suspension, and the engine speed. From those the acceleration is computed
-// per frame, so what a rig feels is the game's own physics; only the vertical
-// channel is still modelled (from the force feedback's shake), and the world
-// position and pitch are not mapped yet.
+// The player car's physics state is mapped (docs/game_ram.md "Player car
+// state"): its world position and velocity, its heading, pitch and roll (all
+// three checked against the car the renderer draws), the per-wheel suspension
+// and the engine speed. From those the yaw rate and the acceleration in the
+// car's own axes are computed per frame, so what a rig feels is the game's own
+// physics; only the vertical channel is still modelled (from the force
+// feedback's shake).
 #include "telemetry.h"
 
 #include <algorithm>
@@ -66,18 +66,16 @@ constexpr uint32_t CAR_PTR = 0x2242B0;        // pointer to the player car's sta
 // frame). Found by RAM-dump diffing of mirrored steering runs and a straight
 // braking run (docs/game_ram.md "Player car state" has the table and the
 // method; tools/car_scan.py compares dumps).
-constexpr uint32_t C_LAT = 0x00;        // m right of the road's centre line
-constexpr uint32_t C_YAW = 0x04;        // heading, radians, world frame
-constexpr uint32_t C_DIST = 0x08;       // signed metres along the road (can go backwards)
-constexpr uint32_t C_ROLL = 0x0C;       // body roll, radians, + = leaning left
-constexpr uint32_t C_VROAD = 0x14;      // signed velocity along the road / VROAD_SCALE
+// The block is the car's world-space rigid body (re-mapped 2026-11-20 against the
+// renderer's own picture of the car, docs/game_ram.md "Player car state"):
+constexpr uint32_t C_POS = 0x00;        // 3 floats: world X, Y (height, + up), Z, metres
+constexpr uint32_t C_VEL = 0x0C;        // 3 floats: world velocity X, Y, Z, metres per game frame
 constexpr uint32_t C_STEER = 0x20;      // the game's own steering, -0.637 (right) .. +0.637 (left)
 constexpr uint32_t C_SUSP = 0x24;       // 4 wheels, suspension compression (x4 = about 0..1)
 constexpr uint32_t C_TRACK_PT = 0x48;   // int: the track point under the car
-constexpr uint32_t C_GAME_LAT = 0x10C;  // the tire model's lateral force incl. slip, + = left
-constexpr uint32_t C_PITCH = 0xFC;      // body pitch, radians, + = nose up: brake dive (-0.075 at -2.9 g).
-                                        // The game models dive only - it stays 0 under acceleration - and 0 at rest
-constexpr float VROAD_SCALE = 60.24f;   // +0x14 read 0.881 at 53.08 m/s: 1/60.24 per m/s
+constexpr uint32_t C_PITCH = 0x108;     // radians, + = nose up (world: slopes, crests, dive)
+constexpr uint32_t C_HEADING = 0x10C;   // radians, world; minus it is the heading, which grows turning right
+constexpr uint32_t C_ROLL = 0x110;      // radians, + = leaning right (world: banks, body roll)
 constexpr float RPM_MAX = 8800.0f;      // the limiter every car hits; idle sits near 800
 constexpr float STEER_MAX = 0.637f;     // the car state's full-lock steering
 constexpr int MODE_CHAMPIONSHIP = 0, MODE_PRACTICE = 2;
@@ -133,6 +131,7 @@ float wrap_pi(float a) {   // keep a yaw difference in -pi..pi
 // ---- One game state sample, and what the two formats are built from ----
 struct Sample {
     bool on = false;        // racing: what Forza's is_race_on and SimHub's active mean
+    bool car_ok = false;    // the car state was read this frame (a heading of exactly 0 is a real heading)
     float speed = 0;        // m/s, the game's own total speed
     float v_road = 0;       // signed velocity along the road (negative reversing), m/s
     float rpm = 0;          // the game's engine speed, 800..8800
@@ -144,7 +143,9 @@ struct Sample {
     float ffb = 0, vib = 0, shake = 0;   // the servo's force and vibration
     float long_g = 0, lat_g = 0, vert_g = 1;   // car frame: + long accelerates, + lat right
     float yaw = 0, yaw_rate = 0, roll = 0, pitch = 0;   // radians; yaw rate + = turning right
-    float lat_off = 0, dist = 0, game_lat = 0; // road space: metres right, metres along, tire force
+    float pos[3] = {0, 0, 0};   // world X, Y (up), Z, metres
+    float vel[3] = {0, 0, 0};   // world velocity, m/s
+    double odo = 0;             // metres driven this race (the packet's distance)
     float susp[4] = {0.5f, 0.5f, 0.5f, 0.5f};  // 0..1, 1 compressed
     int track_point = -1;
     int position = 0, cars = 0;   // 0 = 1st, as the game keeps it
@@ -175,17 +176,20 @@ struct Sample {
         s.rpm = s.on ? std::clamp(float_at(RPM_NORM) * RPM_MAX, RPM_IDLE, RPM_MAX) : 0;
         uint32_t car = rd32(CAR_PTR);
         if (s.on && valid_car(car)) {
-            s.lat_off = float_at(car + C_LAT);
-            s.yaw = float_at(car + C_YAW);
-            s.dist = float_at(car + C_DIST);
-            s.roll = float_at(car + C_ROLL);
-            s.pitch = float_at(car + C_PITCH);
-            s.v_road = float_at(car + C_VROAD) * VROAD_SCALE;
+            s.car_ok = true;
+            for (uint32_t i = 0; i < 3; i++) {
+                s.pos[i] = float_at(car + C_POS + 4 * i);
+                s.vel[i] = float_at(car + C_VEL + 4 * i) * float(FRAME_HZ);
+            }
+            s.yaw = wrap_pi(-float_at(car + C_HEADING));   // + = turned right
+            s.pitch = float_at(car + C_PITCH);              // + = nose up
+            s.roll = -float_at(car + C_ROLL);               // + = leaning left
+            // forward velocity: the world velocity along the car's heading (signed: backwards < 0)
+            s.v_road = s.vel[0] * std::sin(s.yaw) + s.vel[2] * std::cos(s.yaw);
             s.game_steer = std::clamp(-float_at(car + C_STEER) / STEER_MAX, -1.0f, 1.0f);   // + = right
             for (int i = 0; i < 4; i++)
                 s.susp[i] = std::clamp(float_at(car + C_SUSP + 4 * uint32_t(i)) * 4.0f, 0.0f, 1.0f);
             s.track_point = rdi(car + C_TRACK_PT);
-            s.game_lat = float_at(car + C_GAME_LAT);
         }
         int steer = g_inputs.steer - 128;
         s.steer = std::clamp(float(steer) / 127.0f, -1.0f, 1.0f);
@@ -204,24 +208,30 @@ struct Sample {
     }
 
     // Derived forces, from this and the last sample (called every frame).
-    // The heading, the road velocity and the roll are the game's own values:
-    // the yaw rate, the longitudinal acceleration and the lateral acceleration
-    // below are their frame-to-frame derivatives, so a rig feels the real
-    // physics of the arcade program, walls and all.
+    // The heading and the world velocity are the game's own values: the yaw
+    // rate and the accelerations below are their frame-to-frame derivatives,
+    // so a rig feels the real physics of the arcade program, walls and all.
     void derive(const Sample& was) {
-        if (on && was.on && (yaw != 0 || was.yaw != 0)) {
-            float w = wrap_pi(yaw - was.yaw) * float(FRAME_HZ);   // + = turning left
-            // The heading derivative, slew-limited against was.yaw_rate (the
-            // previous frame's limited value) before anything uses it
-            float raw = -w;   // our convention: + turning right
+        if (on && was.on && car_ok && was.car_ok) {
+            // The heading derivative (+ = turning right), slew-limited against
+            // was.yaw_rate (the previous frame's limited value)
+            float raw = wrap_pi(yaw - was.yaw) * float(FRAME_HZ);
             yaw_rate = was.yaw_rate + std::clamp(raw - was.yaw_rate, -YAW_RATE_STEP, YAW_RATE_STEP);
-            // centripetal lateral acceleration, + right in a right turn.
-            // Signed forward velocity x yaw rate, so it mirrors correctly
-            // when the car moves backwards (caught by the dashboard parser).
-            lat_g = std::clamp(v_road * yaw_rate / G, -4.0f, 4.0f);
-            long_g = std::clamp((v_road - was.v_road) * float(FRAME_HZ) / G, -3.0f, 3.0f);
+            // The world acceleration in the car's own axes: forward (sin, cos)
+            // of the heading, right (cos, -sin). + long accelerates, + lat is
+            // to the right (a right turn), slides and wall hits included
+            float ax = (vel[0] - was.vel[0]) * float(FRAME_HZ), az = (vel[2] - was.vel[2]) * float(FRAME_HZ);
+            float sn = std::sin(yaw), cs = std::cos(yaw);
+            lat_g = std::clamp((ax * cs - az * sn) / G, -4.0f, 4.0f);
+            long_g = std::clamp((ax * sn + az * cs) / G, -3.0f, 3.0f);
         } else {
             yaw_rate = lat_g = long_g = 0;
+        }
+        if (on && was.on && car_ok && was.car_ok) {
+            float h = std::sqrt(vel[0] * vel[0] + vel[2] * vel[2]);
+            odo = was.odo + (h < 150.0f ? h / float(FRAME_HZ) : 0.0f);   // (a teleport to a restart adds nothing)
+        } else if (!on) {
+            odo = 0;
         }
         ffb_slow += 0.2f * (ffb - ffb_slow);
         shake = std::max(vib, std::fabs(ffb - ffb_slow));
@@ -287,7 +297,7 @@ size_t build_forza(const Sample& s, uint8_t* p) {
     put_f32(p + 28, s.long_g * G);       // Z: longitudinal, + accelerating
     put_f32(p + 32, 0), put_f32(p + 36, 0), put_f32(p + 40, s.v_road);   // velocity: Z forward, signed
     put_f32(p + 44, 0), put_f32(p + 48, s.yaw_rate), put_f32(p + 52, 0);   // angular velocity: Y yaw, + right
-    put_f32(p + 56, s.yaw), put_f32(p + 60, -s.pitch), put_f32(p + 64, s.roll);   // radians: heading, pitch (reader's convention: + = nose down), roll (+ = lean left, as JSON)
+    put_f32(p + 56, s.yaw), put_f32(p + 60, -s.pitch), put_f32(p + 64, s.roll);   // radians: heading (+ = turned right), pitch (reader's convention: + = nose down), roll (+ = lean left, as JSON)
     for (int i = 0; i < 4; i++) put_f32(p + 68 + 4 * uint32_t(i), s.susp[i]);   // FL FR RL RR, 1 = compressed
     // Slip at the driven (rear) wheels: spinning away, locking brakes
     float slip = 0;
@@ -310,14 +320,14 @@ size_t build_forza(const Sample& s, uint8_t* p) {
     put_i32(p + 228, s.car == 5 ? 12 : 6);   // cylinders (the Stratos has a V12)
     // The dash block, after the 12-byte gap at 232
     uint8_t* d = p + 244;
-    put_f32(d + 0, 0), put_f32(d + 4, 0), put_f32(d + 8, 0);   // world position: not mapped yet
+    put_f32(d + 0, s.pos[0]), put_f32(d + 4, s.pos[1]), put_f32(d + 8, s.pos[2]);   // world position, metres (Y up)
     put_f32(d + 12, s.speed);   // m/s, total
     put_f32(d + 16, 300.0f * s.rpm * 6.28318f / 60.0f * s.gas);   // power W, a flat 300 Nm with the throttle
     put_f32(d + 20, 300.0f * s.gas);   // torque Nm
     for (int i = 0; i < 4; i++) put_f32(d + 24 + 4 * uint32_t(i), temp);
     put_f32(d + 40, 0);   // boost
     put_f32(d + 44, 0.5f);   // fuel
-    put_f32(d + 48, float(s.dist));   // distance along the road, metres
+    put_f32(d + 48, float(s.odo));   // distance driven this race, metres
     // The times, seconds of the game's own clock as the HUD shows them: best, last and
     // current lap, then the race time - the stage clock, 0 at each stage start, laps summed
     put_f32(d + 52, float(s.best_lap)), put_f32(d + 56, float(s.last_lap)), put_f32(d + 60, float(s.lap_time));
@@ -341,7 +351,7 @@ size_t build_json(const Sample& s, char* out, size_t cap) {
              "\"steer\":%.3f,\"game_steer\":%.3f,\"gas\":%.3f,\"brake\":%.3f,\"hand\":%d,"
              "\"ffb\":%.3f,\"vib\":%.3f,\"shake\":%.3f,"
              "\"long_g\":%.3f,\"lat_g\":%.3f,\"vert_g\":%.3f,\"yaw\":%.4f,\"yaw_rate\":%.3f,\"roll\":%.4f,\"pitch\":%.4f,"
-             "\"lat_off\":%.2f,\"dist\":%.1f,\"track_point\":%d,\"game_lat\":%.3f,"
+             "\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"odo\":%.1f,\"track_point\":%d,"
              "\"susp\":[%.3f,%.3f,%.3f,%.3f],"
              "\"pos\":%d,\"cars\":%d,\"lap\":%d,\"laps\":%d,\"laps_done\":%d,"
              "\"prog\":%d,\"sect\":%d,\"chk\":%d,\"round\":%d,\"mode\":%d,\"phase\":%d,\"seq\":%d,"
@@ -350,7 +360,7 @@ size_t build_json(const Sample& s, char* out, size_t cap) {
              "\"total_bcd\":%.3f,\"lap_bcd\":%.3f}\n",
              (unsigned long long)s.frame, s.on ? 1 : 0, s.speed, s.v_road, s.rpm, s.gear, s.steer,
              s.game_steer, s.gas, s.brake, s.hand ? 1 : 0, s.ffb, s.vib, s.shake, s.long_g, s.lat_g,
-             s.vert_g, s.yaw, s.yaw_rate, s.roll, s.pitch, s.lat_off, s.dist, s.track_point, s.game_lat, s.susp[0],
+             s.vert_g, s.yaw, s.yaw_rate, s.roll, s.pitch, s.pos[0], s.pos[1], s.pos[2], s.odo, s.track_point, s.susp[0],
              s.susp[1], s.susp[2], s.susp[3], s.position + 1, s.cars, s.lap_no + 1, s.laps, s.laps_done,
              s.progress, s.section, s.checkpoints, s.round, s.mode, s.phase, s.sequence, s.result, s.goal,
              s.clock, s.left, s.car, s.gears, s.lap_time, s.best_lap, s.last_lap, s.race_time, s.total_bcd,
@@ -394,7 +404,7 @@ void telemetry_frame(float ffb_force, float ffb_vibration) {
     s.derive(was);
     was = s;
     frame_count++;
-    char buf[1024];
+    char buf[2048];
     if (send_json) {
         size_t n = build_json(s, buf, sizeof buf);
         sendto(sock, buf, int(n), 0, (sockaddr*)&dest, sizeof dest);

@@ -19,9 +19,10 @@ the same prompt you start `SegaRally2.exe` from. The game prints
 
 ## Formats
 
-**json** — one line per frame, every field named (speed, signed road
+**json** — one line per frame, every field named (speed, signed forward
 velocity, the game's RPM, gear, steer, gas, brake, ffb, long_g, lat_g, vert_g,
-yaw, yaw_rate, roll, lateral offset, road distance, per-wheel suspension,
+yaw, yaw_rate, roll, pitch, world position x/y/z, distance driven (odo),
+per-wheel suspension,
 plus the whole race state: progress, laps, times, round, rank, result). Good
 for FlyPT Mover's generic UDP input, scripts, and logging.
 `tools/telemetry_listen_test.py` is a small Python listener for testing:
@@ -53,20 +54,20 @@ Forza telemetry listener.
 
 ### What is real and what is derived
 
-The game's own road-space car state is mapped (docs/game_ram.md "Player car
-state"), so most channels are the arcade program's real values:
+The game's own car state is mapped (docs/game_ram.md "Player car state"),
+so most channels are the arcade program's real values:
 
-- **Real**: speed, signed velocity along the road, heading and yaw rate, body
-  roll, lateral offset from the centre line, distance along the road, per-wheel
-  suspension, the engine's RPM, gear, the wheel/pedals/shifter the port feeds
-  the cabinet, the drive board's servo force and vibration, lap and race
-  times, progress, grid position, race result.
-- **Computed from real values**: longitudinal and lateral acceleration
-  (frame-to-frame derivatives, so braking, sand, wall hits and slides are all
-  the game's own physics), wheel rotation speeds.
+- **Real**: speed, world position and velocity, heading, pitch and roll (world
+  orientation: slopes, crests, banks and body motion), per-wheel suspension,
+  the engine's RPM, gear, the wheel/pedals/shifter the port feeds the cabinet,
+  the drive board's servo force and vibration, lap and race times, progress,
+  grid position, race result.
+- **Computed from real values**: the yaw rate (the heading's frame-to-frame
+  change), longitudinal and lateral acceleration (the world velocity's change
+  in the car's own axes, so braking, sand, wall hits and slides are all the
+  game's own physics), forward velocity, distance driven, wheel rotation speeds.
 - **Still modelled**: vertical acceleration (from the servo's shake channel,
-  kerbs and bumps), slip ratios, tire temps, power/torque. World position,
-  pitch and the car's orientation matrix are not mapped yet.
+  kerbs and bumps), slip ratios, tire temps, power/torque.
 
 In the forza packet the acceleration channels follow the reader's convention,
 in m/s^2: X lateral (+ right), Y vertical with gravity taken out (about 0 at

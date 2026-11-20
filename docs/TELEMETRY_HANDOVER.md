@@ -6,6 +6,16 @@ producer-guaranteed: the emitter is `src/runtime/telemetry.cpp`, one sample
 per game frame, and the sample data in `docs/telemetry_sample/` was captured
 from it.
 
+**Version 3 (2026-11-20):** the car state was re-mapped (it is world-space,
+not road-space). Byte layout unchanged and conventions unchanged; what changed
+is the data: pitch (60) and roll (64) are now the car's real world orientation
+(they carried the X velocity before), the yaw rate (48) is the car's real
+heading change (it was the height's), the accelerations are the world
+velocity's change in the car's axes, the dash block's position (244-252) is
+filled and its distance (292) is metres driven. The JSON's `lat_off`, `dist`
+and `game_lat` are replaced by `x`, `y`, `z` and `odo`. Sections below that
+say "road-space" or "not mapped" describe version 2.
+
 Version 2, after mapping the game's own road-space car physics (see
 `docs/game_ram.md` "Player car state"). The acceleration channels now come
 from the arcade program's real state, in **the reader's axis convention**, and

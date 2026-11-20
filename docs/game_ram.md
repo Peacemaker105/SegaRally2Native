@@ -286,33 +286,39 @@ menu first (0x137124 = 1, then 0x7107C), which ran unseen for some 1900
 frames. Writing -1 (power on) to the main sequence's next entry leaves the
 game stuck.
 
-## Player car state (road-space physics)
+## Player car state (world-space rigid body)
 
 The player car's state lives in a 396-byte heap block pointed to by
 **[0x2242B0]** (set at fn_000322BC: a list-node allocation, the pointer is
 node + 0xC; 0x776A8C in the runs here, read the pointer every frame, it is not
-a constant). Offsets confirmed by RAM-dump diffing: a straight run vs a
-steering run (fields that diverge = steering-coupled), two mirrored runs
-(aim176 vs aim80, fields that flip sign exactly = lateral group), and a
-straight full-brake run (fields that move = longitudinal). All floats.
+a constant). All floats unless said.
+
+**Re-mapped 2026-11-20.** The first map (below the old labels in git history)
+called +0x00/+0x04/+0x08 lateral offset / heading / road distance and +0x0C
+body roll: it came from scripted runs that never left the start straight,
+where world X and Z happen to look like road coordinates. A real two-stage
+drive (X to -665 m, Z to +-900 m, +0x04 following the car's height) showed
+otherwise. The new map is checked against the renderer's own picture of the
+car: the car model's axes against the world's in a chase-view drive, and the
+in-car camera (rigidly on the car) in DRIVER view. Heading: median error 0.002
+rad; pitch r = 0.973 (residual 0.19 deg); roll r = -0.994 (residual 0.18 deg);
+d(position)/frame = velocity at r = 0.999.
 
 | Offset | Type | What it is |
 |---|---|---|
-| +0x00 | float | **Lateral offset** from the road's centre line, metres, + right. Confirmed mirrored: +10.58 steering right vs -10.58 left |
-| +0x04 | float | **Heading** (yaw), radians, world frame. Stays put driving straight; unwrapped derivative = yaw rate |
-| +0x08 | float | **Distance along the road**, metres, **signed** — a wall bounce can take it backwards (50 → 28 m). 4 per-wheel copies at +0x54, a previous-frame copy at +0xF8 |
-| +0x0C | float | **Body roll**, radians, + leaning left. Confirmed mirrored (±0.24); constant 0 in straight runs. No steering-independent angle here: straight full-braking does not move it |
-| +0x0FC | float | **Body pitch**, radians, + nose up: brake dive, −0.075 (−4.3°) under a −2.9 g straight-braking stop, decaying to 0 as the car stops. Holds 0 under steady acceleration and at rest; wall hits and road crests move it further. Found in the dense-brake dumps (tools/car_scan.py window); its neighbours +0x0F0/+0x0F4/+0x0F8 mirror +0x00/+0x04/+0x08, pitch has no +0x0C-side counterpart |
-| +0x14 | float | **Velocity along the road**, signed, divided by 60.24 (read 0.881 at 53.08 m/s). Diverges from the HUD speed while sliding |
+| +0x00 / +0x04 / +0x08 | 3×float | **World position** X, Y (height, + up), Z, metres (the renderer's world frame) |
+| +0x0C / +0x10 / +0x14 | 3×float | **World velocity** X, Y, Z, metres **per game frame** (x 57.524 = m/s) |
 | +0x20 | float | The game's own steering, -0.637 (full right) .. +0.637 (full left), 1.556 x the ADC input |
-| +0x24..+0x30 | 4×float | Per-wheel suspension compression, ~0.09..0.20 (x4 = about 0..1) |
-| +0x34..+0x40 | 4×float | Per-wheel grip/slip metric: ~0.25 slow and clean, ~-1.0 at speed, spikes when off-road |
+| +0x24..+0x30 | 4×float | Per-wheel suspension compression, ~0.09..0.20 (x4 = about 0..1) (old map, not rechecked) |
+| +0x34..+0x40 | 4×float | Per-wheel grip/slip metric (old map, not rechecked) |
 | +0x48 | int | Track point under the car (fn_0003F1AC reads this for the progress counter) |
-| +0x10C | float | The tire model's lateral force incl. slip, + = left. Hits ±2.7 in wall bounces; does not vanish at walking pace (it is a force model, not kinematics) |
+| +0x0F0..+0x104 | 6×float | Copies of position and velocity at the display stage, usually a frame behind |
+| +0x108 | float | **Pitch**, radians, + = nose up (world: slopes, crests, dive) |
+| +0x10C | float | **Heading**, radians, world; *minus* it is the heading that grows turning right (forward = (sin h, cos h) in X, Z) |
+| +0x110 | float | **Roll**, radians, + = leaning right (world: banks and body roll) |
+| +0x114..+0x11C | 3×float | Angular rates (partly: +0x114 follows the pitch rate, r 0.76); not used |
 | +0x12C | float | Engine/gearbox gauge value: 1.4628 in 3rd, 2.5598 in 4th |
 | +0x134 | float | RPM ceiling (8800; the value dips mid-gear) — not the live RPM |
-| +0x0F0..+0x0F8 | — | Mirrors of +0x00/+0x04/+0x08 (lateral, heading, distance) at the display stage: usually a frame behind, occasionally diverging |
-| +0x0FC | — | Body pitch (see above) — the one angle that lives only here |
 | +0x080..+0x0EC, +0x13C..+0x17C | — | 0x7FFFFFFE fill |
 
 Related block at 0x1B0C24 (written by fn_00039AC8, the drivetrain/engine
